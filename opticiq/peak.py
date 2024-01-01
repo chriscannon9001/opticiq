@@ -6,30 +6,11 @@ Created on Fri Mar 24 14:56:18 2023
 @author: chris
 """
 
-
 from matplotlib import pyplot as _plt
 import numpy as _np
-from skimage.feature import peak_local_max as _peak
 from scipy import optimize as _opt
 
-from .roi import ROI_xysigma2ellipse
-from .grad import ImGrad
 from .math import _rotate_2d
-
-
-def unit_norm(a, ref=None):
-    '''
-    Normalizes a to 0-1.
-
-    unit_norm = (a - max(a, ref)) / (max(a, ref) - min(a, ref))
-    '''
-    if ref is None:
-        mx = _np.max(a)
-        mn = _np.min(a)
-    else:
-        mx = max(_np.max(a), _np.max(ref))
-        mn = min(_np.min(a), _np.min(ref))
-    return (a - mn) / (mx - mn)
 
 
 def eval_at_POI(a, POI):
@@ -54,38 +35,6 @@ def eval_at_POI(a, POI):
     idx = _np.ravel_multi_index((i, j), a.shape)
     ev = a.flatten()[idx]
     return ev
-
-
-def peaks2sigma0(imgrad, peaks):
-    '''
-    Parameters
-    ----------
-    imgrad : ImGrad
-        Image and gradient data.
-    peaks : array([[j0, i0], [j1, i1], ...])
-        array of peaks (same format as skimage.feature.peak_local_max)
-
-    Returns
-    -------
-    xsigma0, ysigma0 : 1d arrays of float
-        Generally sigma is a second moment with respect to each peak. Sigma0
-        is a fast approximation that doesn't require any ROI.
-        e.g. xsigma0(peak)=sqrt(-2*I(peak)/I_xx(peak)). If the profile is
-        Gaussian form, this formula yields the second moment which is also the
-        same sigma in I=exp(-2*(r/sigma)^2).
-    '''
-    xcurves = eval_at_POI(imgrad.I_xx, peaks)
-    ycurves = eval_at_POI(imgrad.I_yy, peaks)
-    amplitudes = eval_at_POI(imgrad.I1, peaks)
-    xsigma = 2*_np.sqrt(-amplitudes / xcurves)
-    ysigma = 2*_np.sqrt(-amplitudes / ycurves)
-    # lastly, assume we need to make a correction using rss:
-    s = imgrad.sigma
-    xsigma_blur = s if _np.isscalar(s) else s[0]
-    ysigma_blur = s if _np.isscalar(s) else s[1]
-    xsigma = _np.sqrt(xsigma**2 - xsigma_blur**2)
-    ysigma = _np.sqrt(ysigma**2 - ysigma_blur**2)
-    return xsigma, ysigma
 
 
 def find_major_sigma(x, y, Inorm):
@@ -128,7 +77,7 @@ def find_major_sigma(x, y, Inorm):
     return maj_sigma, min_sigma, -theta
 
 
-class Peaks_basic():
+class PeaksAnalysis():
     '''
     Properties
     ----------
@@ -146,15 +95,12 @@ class Peaks_basic():
         Actually it's just the same as sigma, but 4x, i.e. 4*(second-moment).
         And that makes it a well used measurement of diameter.
     '''
-    def __init__(self, I, POI, ROI, weight=None, darklevel=0):
+    def __init__(self, I, ROI, weight=None, darklevel=0):
         '''
         Parameters
         ----------
         I : 2d array
             image
-        POI : array([[j0, i0], [j1, i1], ...])
-            Points-of-Interest (same as peaks from
-            skimage.feature.peak_local_max)
         ROI : child of ROI_ABC
             defines Region of Interest for each peak
         weight : array of weights, optional
@@ -165,15 +111,12 @@ class Peaks_basic():
             background dark level
         '''
         self.I = I
-        self.POI = POI
-        self.Npoi = len(POI)
-        self.weight = (eval_at_POI(I, POI)
-                       if weight is None else weight)
-        self.darklevel = darklevel * _np.ones(len(POI))
+        self.Npoi = len(ROI.slices)
         self.ROI = ROI
         self.simplified = True
         light = [None] * self.Npoi
         for i in range(self.Npoi):
+            # yeah, this is probably unnecessary
             mask = self.ROI.masks[i]
             frame = self.ROI.frames[i]
             dark = self.darklevel[i]
@@ -251,158 +194,18 @@ class Peaks_basic():
         '''
         raise NotImplementedError
 
-    def plot_singlepeak(self, i):
+    def plot_singlepeak(self, k):
+        # FIXME
         fig = _plt.figure()
         ax1 = fig.add_subplot(1, 2, 1)
         e = self.energy
         cy, cx = self.centroid
         dx = self.ROI.dx
         dy = self.ROI.dy
-        ax1.imshow(self._light[i], cmap='gray')
-        ax1.plot(cx[i] - dx[i], cy[i] - dy[i], '.r')
-        msg = 'E %0.2e at (%0.2f, %0.2f)' % (e[i], cx[i], cy[i])
+        ax1.imshow(self._light[k], cmap='gray')
+        ax1.plot(cx[k] - dx[k], cy[k] - dy[k], '.r')
+        msg = 'E %0.2e at (%0.2f, %0.2f)' % (e[k], cx[k], cy[k])
         _plt.title(msg)
         ax2 = fig.add_subplot(1, 2, 2)
-        ax2.imshow(self.ROI.masks[i], cmap='gray')
+        ax2.imshow(self.ROI.masks[k], cmap='gray')
         _plt.title('Mask')
-
-
-class Peaks_findMaxima(Peaks_basic):
-    def __init__(self, immask, masks_pos=(), masks_neg=(),
-                 peak_kwargs={'threshold_rel':.05}, NsigmaROI=2, ROI=None):
-        imgrad = immask.imgrad
-        mask = _np.ones(imgrad.I0.shape, dtype=bool)
-        for pmask in masks_pos:
-            mask = _np.logical_and(mask, pmask)
-        for nmask in masks_neg:
-            mask = _np.logical_and(mask, _np.logical_not(nmask))
-        peaks = _peak(imgrad.I1*mask, **peak_kwargs)
-        xsigma, ysigma = peaks2sigma0(imgrad, peaks)
-        if ROI is None:
-            # then we get a default ROI
-            ROI = ROI_xysigma2ellipse(imgrad.I0, peaks, xsigma, ysigma,
-                                      NsigmaROI=NsigmaROI)
-        dark_avg, _, _ = immask.dark
-        super().__init__(imgrad.I0, peaks, ROI, darklevel=dark_avg)
-
-    def plot_all(self):
-        fig = _plt.figure()
-        ax1 = fig.add_subplot(1, 2, 1)
-        ax1.imshow(self.I, cmap='gray')
-        _plt.title('Maxima - Original')
-        ax2 = fig.add_subplot(1, 2, 2)
-        ax2.imshow(self.imgrad.I1, cmap='gray')
-        _plt.title('w Gaussian Blur')
-        cy, cx = self.centroid
-        for ax in [ax1, ax2]:
-            for i in range(len(self.POI)):
-                y, x = tuple(self.POI[i])
-                #wt = weights[i]
-                ax.plot(cx[i], y[i], '.r')
-
-
-class Peaks_findStars(Peaks_basic):
-    def __init__(self, immask, masks_pos=(), masks_neg=(),
-                 peak_kwargs={'threshold_rel':.05}, NsigmaROI=2, ROI=None):
-        '''
-        Parameters
-        ----------
-        immask : ImMask
-            image, gradient, and mask object
-        masks_pos : tuple of 2d array of bool, same dim as image
-            Positive sense masks, selecting a section of interest.
-            The default is ().
-        masks_neg : tuple of 2d array of bool, same dim as image
-            Negative sense masks, deselecting a section. The default is ().
-        peak_kwargs : dict, optional
-            Arguments to control the finder (skimage.feature.peak_local_max).
-            The default is {'threshold_rel':.05}.
-        NsigmaROI : TYPE, optional
-            DESCRIPTION. The default is 2.
-        ROI : TYPE, optional
-            DESCRIPTION. The default is None.
-        '''
-        imgrad = immask.imgrad
-        mask = _np.ones(imgrad.I0.shape, dtype=bool)
-        for pmask in masks_pos:
-            mask = _np.logical_and(mask, pmask)
-        for nmask in masks_neg:
-            mask = _np.logical_and(mask, _np.logical_not(nmask))
-        stariness = -imgrad.curve * unit_norm(-imgrad.I_r)
-        self._stariness = stariness
-        POI = _peak(stariness*mask, **peak_kwargs)
-        weights = eval_at_POI(stariness, POI)
-        xsigma, ysigma = peaks2sigma0(imgrad, POI)
-        if ROI is None:
-            # then we get a default ROI
-            ROI = ROI_xysigma2ellipse(imgrad.I0, POI, xsigma, ysigma,
-                                      NsigmaROI=NsigmaROI)
-        dark_avg, _, _ = immask.dark
-        super().__init__(imgrad.I0, POI, ROI, weight=weights,
-                         darklevel=dark_avg)
-
-    def plot_all(self):
-        fig = _plt.figure()
-        ax1 = fig.add_subplot(1, 2, 1)
-        ax1.imshow(self.I, cmap='gray')
-        _plt.title('Stars - Original')
-        ax2 = fig.add_subplot(1, 2, 2)
-        ax2.imshow(self._stariness, cmap='gray')
-        _plt.title('stariness (neg curvature & 0 slope)')
-        cy, cx = self.centroid
-        for ax in [ax1, ax2]:
-            for i in range(len(self.POI)):
-                y, x = tuple(self.POI[i])
-                #wt = weights[i]
-                ax.plot(cx[i], cy[i], '.r')
-
-
-class Peaks_findCheckerPoints(Peaks_basic):
-    def __init__(self, imgrad, peak_kwargs={'threshold_rel':.1},
-                 NsigmaROI=1.5, ROI=None):
-        self._I0 = imgrad.I0
-        D = -imgrad.D_hessian
-        POI = _peak(D, **peak_kwargs)
-        img_D = ImGrad(D, 0)
-        xsigma, ysigma = peaks2sigma0(img_D, POI)
-        D_filter = _np.maximum(D, 0)
-        if ROI is None:
-            # then we get a default ROI
-            ROI = ROI_xysigma2ellipse(D_filter, POI, xsigma, ysigma,
-                                      NsigmaROI=NsigmaROI)
-        super().__init__(D_filter, POI, ROI)
-
-    def plot_singlepeak(self, i):
-        fig = _plt.figure()
-        cy, cx = self.centroid
-        dx = self.ROI.dx
-        dy = self.ROI.dy
-        slice2, slice1 = self.ROI.slices[i]
-        I_frame = self._I0[slice2, slice1]
-        ax1 = fig.add_subplot(1, 3, 1)
-        ax1.imshow(I_frame, cmap='gray')
-        ax1.plot(cx[i] - dx[i], cy[i] - dy[i], '.r')
-        msg = 'Saddle at (%0.2f, %0.2f)' % (cx[i], cy[i])
-        _plt.title(msg)
-        ax2 = fig.add_subplot(1, 3, 2)
-        ax2.imshow(self.ROI.masks[i], cmap='gray')
-        _plt.title('Mask')
-        ax1 = fig.add_subplot(1, 3, 3)
-        ax1.imshow(self._light[i], cmap='gray')
-        ax1.plot(cx[i] - dx[i], cy[i] - dy[i], '.r')
-        _plt.title('-D_hessian')
-
-    def plot_all(self):
-        fig = _plt.figure()
-        ax1 = fig.add_subplot(1, 2, 1)
-        ax1.imshow(self._I0, cmap='gray')
-        _plt.title('Checkers - Original')
-        ax2 = fig.add_subplot(1, 2, 2)
-        ax2.imshow(self.I, cmap='gray')
-        _plt.title('saddliness (-D_hessian)')
-        cy, cx = self.centroid
-        for ax in [ax1, ax2]:
-            for i in range(len(self.POI)):
-                y, x = tuple(self.POI[i])
-                #wt = weights[i]
-                ax.plot(cx[i], cy[i], '.r')

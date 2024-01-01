@@ -6,233 +6,127 @@ Created on Fri Mar 10 18:59:25 2023
 @author: chris
 """
 
-from matplotlib import pyplot as _plt
 import numpy as _np
 from scipy import ndimage as _ndimage
 from skimage import morphology as _morph
 
 
-def mask(f, threshold=0.1):
+def mask(f, threshold=0.1, f0=0):
+    '''mask = (f - f0) / np.max(f) > threshold'''
+    return (f - f0) / _np.max(f) > threshold
+
+
+def maskedges(imgrad, threshold):
+    imgrad['maskedges'] = mask(
+        imgrad['I_r'], threshold)
+
+
+def maskdark(imgrad):
+    mid = _np.median(imgrad['I1'].flatten()[imgrad['maskedges'].flatten()])
+    maskdark0 = imgrad['I1'] < mid
+    imgrad['maskdark'] = _np.logical_and(
+        maskdark0,
+        _np.logical_not(imgrad['maskedges']))
+
+
+def maskedges_hvx(imgrad, threshold):
+    mask_v_abs = mask(_np.abs(imgrad['I_x']), threshold)
+    mask_h_abs = mask(_np.abs(imgrad['I_y']), threshold)
+    mask_v_pos0 = mask(imgrad['I_x'], threshold)
+    mask_v_neg0 = mask(imgrad['I_x'], threshold)
+    mask_h_pos0 = mask(imgrad['I_y'], threshold)
+    mask_h_neg0 = mask(imgrad['I_y'], threshold)
+    masks = [_np.logical_and(mask_v_pos0, _np.logical_not(mask_h_abs)),
+             _np.logical_and(mask_v_neg0, _np.logical_not(mask_h_abs)),
+             _np.logical_and(mask_h_pos0, _np.logical_not(mask_v_abs)),
+             _np.logical_and(mask_h_neg0, _np.logical_not(mask_v_abs))]
+    for i in range(4):
+        # erosion of dilation can cleanup if there's noise in a mask
+        masks[i] = _morph.erosion(_morph.dilation(masks[i]))
+    imgrad['mask_v_pos'] = masks[0]
+    imgrad['mask_v_neg'] = masks[1]
+    imgrad['mask_h_pos'] = masks[2]
+    imgrad['mask_h_neg'] = masks[3]
+
+
+def maskridges_hvx(imgrad, threshold):
+    mask_v0 = mask(-imgrad['I_xx'], threshold)
+    mask_h0 = mask(-imgrad['I_yy'], threshold)
+    imgrad['mask_v'] = _np.logical_and(mask_v0, _np.logical_not(mask_h0))
+    imgrad['mask_h'] = _np.logical_and(mask_h0, _np.logical_not(mask_v0))
+
+
+def imageGradients(I0, sigma, require=[], threshold=None):
     '''
+    Preprocessing steps potentially applicable to every image quality test.
+
+    Given a raw image, blur it, maked derivatives, package results as a dict
+    of 2d arrays. Note that the keys of the dict follow a naming convention.
+
+    Name of Arrays
+    --------------
+    | x, y : global coordinates (column, row) of pixels
+    | I0 : original image       
+    | I1 : blurred image
+    | I_x : dI1/dx
+    | I_y : dI1/dy
+    | I_r : sqrt(I_x**2 + I_y**2) aka magnitude of slope
+    | I_xx : d2I1/dxdx
+    | I_xy : d2I1/dxdy
+    | I_yx : d2I1/dydx
+    | I_yy : d2I1/dydy
+    | curve : I_xx + I_yy aka curvature, which goes to 0 at saddle point
+    | D_hessian : I_xx * I_yy - I_xy * I_yx
+    | maskedges : I_r / max(I_r) < threshold
+    | mask_h_abs : abs(I_y)/max(abs(I_y)) < threshold
+    | mask_v_abs : ... similar to mask_h_abs
+    | mask_v_pos : I_x / max(I_x) < threshold and not mask_h_abs 
+    | mask_v_neg, mask_h_pos, mask_h_get : .., similar to mask_v_pos
+
     Parameters
     ----------
-    f : 2d array
-        DESCRIPTION.
-    threshold : float
-        DESCRIPTION.
+    I0 : 2d array
+        Original image
+    sigma : float
+        Sigma (pixels) to blur image before derivatives
+    require : list of str
+        Each str in list should be a standard name of an array (above).
+        Dependencies can be resolved automatically, so ['D_hessian'] will
+        also call all the first and second order derivatives.
+        The default is [], which will only return the blurred image.
+    threshold : TYPE, optional
+        DESCRIPTION. The default is None.
 
     Returns
     -------
-    mask : 2d array (bool)
-        Description
+    imgrad : dict of 2d arrays
+        All results required or implied.
     '''
-    mx = _np.max(f)
-    f_norm = f / mx
-    mask = f_norm > threshold
-    return mask
-
-
-class ImGrad():
-    '''
-    ImGrad is a low-level collection of gradient calcs commonly used in image
-    post-processsing.
-
-    One-time getters produce calcs and then are shorted by storage
-    subsequently, and so redundant calls may be streamlined despite.
-
-    Properties
-    ----------
-    sigma : 0 or float
-        Gaussian sigma for blur which is applied before anything else. If 0, no
-        blur is used.
-    I1 : 2d array
-        Image after Gaussian blur. All calculations use this as input.
-    I_x, I_y : 2d array
-        first derivatives of image with respect to x and y
-    I_r : 2d array
-        the magnitude of the linear gradient = sqrt(I_x^2 + I_y^2)
-    I_xx, I_xy, I_yy, I_yx : 2d array
-        second derivatives
-    curve : 2d array
-        curvature, or a mix of curvature terms (can be 0 for a saddle point)
-        = I_xx + I_yy + I_xy
-    D_hessian : 2d array
-        determinant of Hessian matrix ( = I_xx * I_yy - I_xy * I_yx)
-    '''
-    def __init__(self, I0, sigma):
-        '''
-        Parameters
-        ----------
-        I0 : 2d array
-            original image
-        sigma : float
-            Gaussian sigma for blur which is applied before anything else.
-        '''
-        I1 = (I0 if (_np.isscalar(sigma) and _np.isclose(sigma, 0))
-              else _ndimage.gaussian_filter(I0, sigma))
-        self.I0 = I0
-        self.sigma = sigma
-        self._min_d = int(sigma + .5)
-        self.I1 = I1
-
-    @property
-    def I_x(self):
-        if not hasattr(self, '_I_x'):
-            # say, can images vary between row-major and column-major?
-            self._I_y, self._I_x = _np.gradient(self.I1)
-        return self._I_x
-
-    @property
-    def I_y(self):
-        if not hasattr(self, '_I_y'):
-            self._I_y, self._I_x = _np.gradient(self.I1)
-        return self._I_y
-
-    @property
-    def I_r(self):
-        if not hasattr(self, '_I_r'):
-            self._I_r = _np.sqrt(self.I_x**2 + self.I_y**2)
-        return self._I_r
-
-    @property
-    def I_xx(self):
-        if not hasattr(self, '_I_xx'):
-            self._I_xy, self._I_xx = _np.gradient(self.I_x)
-        return self._I_xx
-
-    @property
-    def I_xy(self):
-        if not hasattr(self, '_I_xy'):
-            self._I_xy, self._I_xx = _np.gradient(self.I_x)
-        return self._I_xy
-
-    @property
-    def I_yx(self):
-        if not hasattr(self, '_I_yx'):
-            self._I_yy, self._I_yx = _np.gradient(self.I_y)
-        return self._I_yx
-
-    @property
-    def I_yy(self):
-        if not hasattr(self, '_I_yy'):
-            self._I_yy, self._I_yx = _np.gradient(self.I_y)
-        return self._I_yy
-
-    @property
-    def curve(self):
-        if not hasattr(self, '_curve'):
-            #self._curve = _np.sqrt(self.I_xx**2 + self.I_yy**2 + self.I_xy * self.I_yx)
-            self._curve = self.I_xx + self.I_yy #+ self.I_xy + self.I_yx
-        return self._curve
-
-    @property
-    def D_hessian(self):
-        if not hasattr(self, '_D_hessian'):
-            self._D_hessian = self.I_xx * self.I_yy - self.I_xy * self.I_yx
-        return self._D_hessian
-
-
-class ImMask():
-    '''
-    MAYBE
-    do I want to redo this as functional programming?
-
-    maskedges_hvx : tuple(mask_v_pos, mask_v_neg, mask_h_pos, mask_h_neg)
-        Exclusive hor, ver masks delineating edges. Note that edges have a
-        sign, so positive and negative edges are separate. Exclusive means
-        ignoring corners areas, and this helps clean downstream edge-function.
-
-        mask_v_pos : 2d bool array
-            ROI mask; ver edge (step function along x), positive-going edge
-        mask_v_neg : 2d bool array
-            ROI mask; ver edge (step function along x), negative-going edge
-        mask_h_pos : 2d bool array
-            ROI mask; hor edge (step function along y), positive-going edge
-        mask_h_neg : 2d bool array
-            ROI mask; hor edge (step function along y), negative-going edge
-    maskridges_hvx : tuple(mask_v, mask_h)
-        Exclusive hor, ver masks delineating ridges. Exclusive means ignoring
-        crossings, and this helps clean downstream line-spread-function.
-
-        mask_v : 2d bool array
-            ROI mask; ver line (line-function along x)
-        mask_h : 2d bool array
-            ROI mask; hor line (line-function along y)
-    '''
-    def __init__(self, imgrad, threshold):
-        '''
-        imgrad : ImGrad
-            blurred image with gradients
-        threshold : float 0-1, optional
-            Threshold used to get masks from derivatives.
-        '''
-        self.imgrad = imgrad
-        self._threshold = threshold
-
-    @property
-    def maskedges(self):
-        if not hasattr(self, '_maskedges'):
-            self._maskedges = mask(
-                self.imgrad.I_r, threshold=self._threshold)
-        return self._maskedges
-
-    @property
-    def maskdark(self):
-        if not hasattr(self, '_maskdark'):
-            mid = _np.median(self.imgrad.I1.flatten()[self.maskedges.flatten()])
-            maskdark0 = self.imgrad.I1 < mid
-            self._maskdark = _np.logical_and(
-                maskdark0,
-                _np.logical_not(self.maskedges))
-        return self._maskdark
-
-    @property
-    def dark(self):
-        if not hasattr(self, '_dark'):
-            dark = self.imgrad.I0.flatten()[self.maskdark.flatten()]
-            avg = _np.mean(dark)
-            med = _np.median(dark)
-            rms = _np.std(dark)
-            self._dark = avg, med, rms
-        return self._dark
-
-    @property
-    def maskedges_hvx(self):
-        if not hasattr(self, '_maskedges_hvx'):
-            mask_v_abs = mask(_np.abs(self.imgrad.I_x), threshold=self._threshold)
-            mask_h_abs = mask(_np.abs(self.imgrad.I_y), threshold=self._threshold)
-            mask_v_pos0 = mask(self.imgrad.I_x, threshold=self._threshold)
-            mask_v_neg0 = mask(-self.imgrad.I_x, threshold=self._threshold)
-            mask_h_pos0 = mask(self.imgrad.I_y, threshold=self._threshold)
-            mask_h_neg0 = mask(-self.imgrad.I_y, threshold=self._threshold)
-            masks = [_np.logical_and(mask_v_pos0, _np.logical_not(mask_h_abs)),
-                     _np.logical_and(mask_v_neg0, _np.logical_not(mask_h_abs)),
-                     _np.logical_and(mask_h_pos0, _np.logical_not(mask_v_abs)),
-                     _np.logical_and(mask_h_neg0, _np.logical_not(mask_v_abs))]
-            for i in range(4):
-                # dilation of erosion can cleanup if there's noise in a mask
-                masks[i] = _morph.dilation(_morph.erosion(masks[i]))
-            self._maskedges_hvx = tuple(masks)
-        return self._maskedges_hvx
-
-    @property
-    def maskridges_hvx(self):
-        if not hasattr(self, '_maskridges_hvx'):
-            mask_v0 = mask(-self.imgrad.I_xx, self._threshold)
-            mask_h0 = mask(-self.imgrad.I_yy, self._threshold)
-            mask_v = _np.logical_and(mask_v0, _np.logical_not(mask_h0))
-            mask_h = _np.logical_and(mask_h0, _np.logical_not(mask_v0))
-            self._maskridges_hvx = mask_v, mask_h
-        return self._maskridges_hvx
-
-    def plot_dark(self):
-        dark = self.imgrad.I0 * self.maskdark
-        _plt.figure()
-        _plt.imshow(dark, cmap='gray')
-        title = 'Masked for dark level\n'
-        avg, med, rms = self.dark
-        if med > 1:
-            title += '(avg %0.3f med %0.3f rms %0.3f)' % (avg, med, rms)
-        else:
-            title += '(avg %0.3e med %0.3e rms %0.3e)' % (avg, med, rms)
-        _plt.title(title)
+    # some logic finds implied parameters
+    do_dhesse = 'D_hessian' in require
+    do_curve = 'curve' in require
+    do_d2 = (do_dhesse or do_curve or 'I_xx' in require)
+    do_Ir = 'I_r' in require
+    do_d1 = (do_d2 or do_Ir or 'I_x' in require or 'I_y' in require)
+    # xframe and yframe indicate global coordinates of pixels
+    ny, nx = I0.shape
+    x, y = _np.meshgrid(range(nx), range(ny))
+    # initial dataset is xframe, yframe, and original image
+    imgrad = dict(I0=I0, x=x, y=y)
+    # add blurred image
+    imgrad['I1'] = _ndimage.gaussian_filter(I0, sigma)
+    if do_d1:
+        # first derivatives
+        imgrad['I_y'], imgrad['I_x'] = _np.gradient(imgrad['I1'])
+    if do_Ir:
+        imgrad['I_r'] = _np.sqrt(imgrad['I_y']**2 + imgrad['I_x']**2)
+    if do_d2:
+        # second derivatives
+        imgrad['I_xy'], imgrad['I_xx'] = _np.gradient(imgrad['I_x'])
+        imgrad['I_yy'], imgrad['I_yx'] = _np.gradient(imgrad['I_y'])
+    if do_curve:
+        imgrad['curve'] = imgrad['I_xx'] + imgrad['I_yy'] #+ self.I_xy + self.I_yx
+    if do_dhesse:
+        # Hessian determinant
+        imgrad['D_hessian'] = imgrad['I_xx'] * imgrad['I_yy'] - imgrad['I_xy'] * imgrad['I_yx']
+    return imgrad

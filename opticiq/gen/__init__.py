@@ -16,3 +16,4 @@ from .chart import *
 from .extra import *
 from .gauss import *
 from .model import *
+from .star import *
