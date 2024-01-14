@@ -12,6 +12,7 @@ from skimage.feature import peak_local_max as _peak
 from .grad import imageGradients as _imageGrad
 from .grad import maskedges_hvx as _mask_ehvx
 from .roi import Regions as _Regions
+#from .roi import Regions_frompoi as _Regions_frompoi
 
 
 def unit_norm(a, ref=None):
@@ -94,11 +95,11 @@ def recipe_checkerboard2(I0, sigma, threshold=0.1):
     imG['mask'] = mask
     imG['f_saddle'] = f_saddle
     poi = _peak(f_saddle * mask, min_distance=sigma)
-    roi = _Regions.from_POI_width(I0.shape, poi, sigma*2, sigma*2)
+    roi = _Regions.from_poi(poi, sigma*2, sigma*2, imG)
     return imG, roi
 
 
-def recipe_slantedge(I0, sigma, threshold=0.1):
+def recipe_slantedge(I0, sigma, threshold=0.1, min_area=20):
     '''
     UNFINISHED
 
@@ -128,11 +129,11 @@ def recipe_slantedge(I0, sigma, threshold=0.1):
     '''
     imG = _imageGrad(I0, sigma, ['I_x', 'I_y'])
     _mask_ehvx(imG, threshold)
-    roi_v_pos = _Regions.from_mask(imG, imG['mask_v_pos'], min_area=20)
-    roi_v_neg = _Regions.from_mask(imG, imG['mask_v_neg'], min_area=20)
-    roi_h_pos = _Regions.from_mask(imG, imG['mask_h_pos'], min_area=20)
-    roi_h_neg = _Regions.from_mask(imG, imG['mask_h_neg'], min_area=20)
-    return imG, roi_v_pos, roi_v_neg, roi_h_pos, roi_h_neg
+    roi_vp = _Regions.from_mask(imG['mask_v_pos'], imG, min_area=min_area)
+    roi_vn = _Regions.from_mask(imG['mask_v_neg'], imG, min_area=min_area)
+    roi_hp = _Regions.from_mask(imG['mask_h_pos'], imG, min_area=min_area)
+    roi_hn = _Regions.from_mask(imG['mask_h_neg'], imG, min_area=min_area)
+    return imG, roi_vp, roi_vn, roi_hp, roi_hn
 
 
 '''def recipe_starfield(I, sigma, threshold=0.05):

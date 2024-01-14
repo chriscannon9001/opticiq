@@ -33,9 +33,9 @@ def maskedges_hvx(imgrad, threshold):
     mask_v_abs = mask(_np.abs(imgrad['I_x']), threshold)
     mask_h_abs = mask(_np.abs(imgrad['I_y']), threshold)
     mask_v_pos0 = mask(imgrad['I_x'], threshold)
-    mask_v_neg0 = mask(imgrad['I_x'], threshold)
+    mask_v_neg0 = mask(-imgrad['I_x'], threshold)
     mask_h_pos0 = mask(imgrad['I_y'], threshold)
-    mask_h_neg0 = mask(imgrad['I_y'], threshold)
+    mask_h_neg0 = mask(-imgrad['I_y'], threshold)
     masks = [_np.logical_and(mask_v_pos0, _np.logical_not(mask_h_abs)),
              _np.logical_and(mask_v_neg0, _np.logical_not(mask_h_abs)),
              _np.logical_and(mask_h_pos0, _np.logical_not(mask_v_abs)),
@@ -66,6 +66,7 @@ def imageGradients(I0, sigma, require=[], threshold=None):
     Name of Arrays
     --------------
     | x, y : global coordinates (column, row) of pixels
+    | ones : 1s for each pixel, initially. Masks leave a footprint
     | I0 : original image       
     | I1 : blurred image
     | I_x : dI1/dx
@@ -112,21 +113,21 @@ def imageGradients(I0, sigma, require=[], threshold=None):
     ny, nx = I0.shape
     x, y = _np.meshgrid(range(nx), range(ny))
     # initial dataset is xframe, yframe, and original image
-    imgrad = dict(I0=I0, x=x, y=y)
+    imG = dict(I0=I0, x=x, y=y, ones=_np.ones(I0.shape))
     # add blurred image
-    imgrad['I1'] = _ndimage.gaussian_filter(I0, sigma)
+    imG['I1'] = _ndimage.gaussian_filter(I0, sigma)
     if do_d1:
         # first derivatives
-        imgrad['I_y'], imgrad['I_x'] = _np.gradient(imgrad['I1'])
+        imG['I_y'], imG['I_x'] = _np.gradient(imG['I1'])
     if do_Ir:
-        imgrad['I_r'] = _np.sqrt(imgrad['I_y']**2 + imgrad['I_x']**2)
+        imG['I_r'] = _np.sqrt(imG['I_y']**2 + imG['I_x']**2)
     if do_d2:
         # second derivatives
-        imgrad['I_xy'], imgrad['I_xx'] = _np.gradient(imgrad['I_x'])
-        imgrad['I_yy'], imgrad['I_yx'] = _np.gradient(imgrad['I_y'])
+        imG['I_xy'], imG['I_xx'] = _np.gradient(imG['I_x'])
+        imG['I_yy'], imG['I_yx'] = _np.gradient(imG['I_y'])
     if do_curve:
-        imgrad['curve'] = imgrad['I_xx'] + imgrad['I_yy'] #+ self.I_xy + self.I_yx
+        imG['curve'] = imG['I_xx'] + imG['I_yy'] #+ self.I_xy + self.I_yx
     if do_dhesse:
         # Hessian determinant
-        imgrad['D_hessian'] = imgrad['I_xx'] * imgrad['I_yy'] - imgrad['I_xy'] * imgrad['I_yx']
-    return imgrad
+        imG['D_hessian'] = imG['I_xx'] * imG['I_yy'] - imG['I_xy'] * imG['I_yx']
+    return imG

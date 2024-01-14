@@ -1,6 +1,6 @@
 Introduction
 ============
-opticiq should one day become a collection of general purpose tools for optical testing.
+opticiq should one day become a collection of flexible tools for quantitative optical testing.
 
 The goal is to bring experts together to collaborate and codify image quality testing, beam quality testing, and some related metrics, into an open source lib. And by doing so, to elevate the field, and minimize wasted redundant code.
 
@@ -11,6 +11,10 @@ Aspiring Feature Set
 * Grid and distortion testing
 * Beam diameter (or star diameter), and other beam metrics
 * Low-level functions that support the above features, e.g. gradient tests and auto-ROI (partially complete)
+
+Look in the docs folder
+-----------------------
+Some jupyter-notebook sessions have been written to demonstrate emerging features.
 
 Reusability Goals
 -----------------
