@@ -7,6 +7,6 @@ Created on Sat Feb 25 14:26:02 2023
 """
 
 from .grad import *
-#from .peak import *
+from .peak import *
 from .recipes import *
 from .roi import *

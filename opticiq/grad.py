@@ -60,29 +60,9 @@ def imageGradients(I0, sigma, require=[], threshold=None):
     '''
     Preprocessing steps potentially applicable to every image quality test.
 
-    Given a raw image, blur it, maked derivatives, package results as a dict
-    of 2d arrays. Note that the keys of the dict follow a naming convention.
-
-    Name of Arrays
-    --------------
-    | x, y : global coordinates (column, row) of pixels
-    | ones : 1s for each pixel, initially. Masks leave a footprint
-    | I0 : original image       
-    | I1 : blurred image
-    | I_x : dI1/dx
-    | I_y : dI1/dy
-    | I_r : sqrt(I_x**2 + I_y**2) aka magnitude of slope
-    | I_xx : d2I1/dxdx
-    | I_xy : d2I1/dxdy
-    | I_yx : d2I1/dydx
-    | I_yy : d2I1/dydy
-    | curve : I_xx + I_yy aka curvature, which goes to 0 at saddle point
-    | D_hessian : I_xx * I_yy - I_xy * I_yx
-    | maskedges : I_r / max(I_r) < threshold
-    | mask_h_abs : abs(I_y)/max(abs(I_y)) < threshold
-    | mask_v_abs : ... similar to mask_h_abs
-    | mask_v_pos : I_x / max(I_x) < threshold and not mask_h_abs 
-    | mask_v_neg, mask_h_pos, mask_h_get : .., similar to mask_v_pos
+    Given a raw image, apply Gaussian blur, make derivatives, package results
+    as a dict of 2d arrays. The keys of the dict follow a naming convention,
+    see below.
 
     Parameters
     ----------
@@ -102,6 +82,27 @@ def imageGradients(I0, sigma, require=[], threshold=None):
     -------
     imgrad : dict of 2d arrays
         All results required or implied.
+
+    Names of Arrays
+    ---------------
+    | x, y : global coordinates (column, row) of pixels
+    | ones : 1s for each pixel, initially. Masks leave a footprint
+    | I0 : original image
+    | I1 : blurred image
+    | I_x : dI1/dx
+    | I_y : dI1/dy
+    | I_r : sqrt(I_x**2 + I_y**2) aka magnitude of slope
+    | I_xx : d2I1/dxdx
+    | I_xy : d2I1/dxdy
+    | I_yx : d2I1/dydx
+    | I_yy : d2I1/dydy
+    | curve : I_xx + I_yy aka curvature, which goes to 0 at saddle point
+    | D_hessian : I_xx * I_yy - I_xy * I_yx
+    | maskedges : I_r / max(I_r) < threshold
+    | mask_h_abs : abs(I_y)/max(abs(I_y)) < threshold
+    | mask_v_abs : ... similar to mask_h_abs
+    | mask_v_pos : I_x / max(I_x) < threshold and not mask_h_abs 
+    | mask_v_neg, mask_h_pos, mask_h_get : .., similar to mask_v_pos
     '''
     # some logic finds implied parameters
     do_dhesse = 'D_hessian' in require

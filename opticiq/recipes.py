@@ -11,8 +11,8 @@ from skimage.feature import peak_local_max as _peak
 
 from .grad import imageGradients as _imageGrad
 from .grad import maskedges_hvx as _mask_ehvx
+from .peak import peaksAnalysis as _peaksAnalysis
 from .roi import Regions as _Regions
-#from .roi import Regions_frompoi as _Regions_frompoi
 
 
 def unit_norm(a, ref=None):
@@ -30,7 +30,7 @@ def unit_norm(a, ref=None):
     return (a - mn) / (mx - mn)
 
 
-def recipe_checkerboard1(I0, sigma, threshold=0.1):
+def recipe_checkerboard1(I0, sigma, threshold=0.2):
     '''
     UNFINISHED
 
@@ -43,7 +43,7 @@ def recipe_checkerboard1(I0, sigma, threshold=0.1):
     sigma : float
         sigma for Gaussian blur (pixels)
     threshold : float, optional
-        threshold of mask. The default is 0.1.
+        threshold used for mask. The default is 0.2.
 
     Returns
     -------
@@ -51,13 +51,18 @@ def recipe_checkerboard1(I0, sigma, threshold=0.1):
         See imageGradients, also will have 'mask'
     roi : Regions object
         Regions of Interest
+    peaks : dict of 1d arrays
     '''
     imG = _imageGrad(I0, sigma, ['D_hessian'])
     D_h = imG['D_hessian']
-    imG['mask'] = -D_h / _np.max(-D_h) > threshold
-    poi = _peak(-D_h, min_distance=sigma)
-    roi = _Regions.from_POI_width(I0.shape, poi, sigma*2, sigma*2)
-    return imG, roi
+    mask = -D_h / _np.max(-D_h) > threshold
+    imG['mask'] = mask
+    imG['f_saddle'] = -D_h
+    #poi = _peak(-D_h, min_distance=sigma)
+    #roi = _Regions.from_poi(poi, sigma*2, sigma*2, imG)
+    roi = _Regions.from_mask(mask, imG)
+    peaks = _peaksAnalysis(roi, imG, 'f_saddle')
+    return imG, roi, peaks
 
 
 def recipe_checkerboard2(I0, sigma, threshold=0.1):
@@ -83,6 +88,7 @@ def recipe_checkerboard2(I0, sigma, threshold=0.1):
         See imageGradients, also will have 'mask'
     roi : Regions object
         Regions of Interest
+    peaks : dict of 1d arrays
     '''
     imG = _imageGrad(I0, sigma, ['D_hessian', 'I_r'])
     # upside-down, 0-1 norm, I_r (slope magnitude) makes a filter function
@@ -96,7 +102,8 @@ def recipe_checkerboard2(I0, sigma, threshold=0.1):
     imG['f_saddle'] = f_saddle
     poi = _peak(f_saddle * mask, min_distance=sigma)
     roi = _Regions.from_poi(poi, sigma*2, sigma*2, imG)
-    return imG, roi
+    peaks = _peaksAnalysis(roi, imG, 'f_saddle')
+    return imG, roi, peaks
 
 
 def recipe_slantedge(I0, sigma, threshold=0.1, min_area=20):

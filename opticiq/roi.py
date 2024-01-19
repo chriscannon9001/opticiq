@@ -22,9 +22,32 @@ import numpy as _np
 from skimage.measure import label as _label
 
 
+def get_rslices(j1, j2, i1, i2):
+    '''
+    Parameters
+    ----------
+    j1, j2, i1, i2 : list or array of int
+        Indices that define slices
+
+    Returns
+    -------
+    rslices :  list of (jslice, islice)
+        This is the format that rslices needs to follow.
+        [(slice(j1[0]:j2[0]), slice(i1[0]:i2[0])),
+         (slice(j1[0]:j2[1]), slice(i1[0]:i2[1]))...]
+    '''
+    Npoi = len(j1)
+    rslices = [None] * Npoi
+    for k in range(Npoi):
+        jslice = slice(j1[k], j2[k])
+        islice = slice(i1[k], i2[k])
+        rslices[k] = (jslice, islice)
+    return rslices
+
+
 class quasiList_ABC(_ABC):
     '''
-    Inheritable class with the purpose of making callables appear and behave
+    Inheritable ABC with the purpose of making callables appear and behave
     like a list. Requires a child class to define ._select(k) and
     ._downselect(bool0, bool1, etc)
     '''
@@ -38,7 +61,9 @@ class quasiList_ABC(_ABC):
 
     def aslist(self):
         '''
-        Executes _select(k) for each k, returning an actual list
+        Executes _select(k) for each k, returning an actual list. This may
+        save time at the expense of memory, if a given [k] will be retrieved
+        multiple times.
         '''
         return [self._select(k) for k in range(len(self))]
 
@@ -59,9 +84,29 @@ class quasiList_ABC(_ABC):
         pass
 
 
-class RegionMasks_labels(quasiList_ABC):
+class rmasks_fromlabels(quasiList_ABC):
     def __init__(self, rslices, labels, idx):
+        '''
+        Creates a list-like (quasiList_ABC) set of masks, where each
+        mask corresponds to exactly one label, even if the labels are close
+        together.
+
+        Parameters
+        ----------
+        rslices : list of (jslice, islice)
+            See get_rslices() for formatting.
+        labels : 2d array of int
+            See return value of skimage.measure.label
+        idx : int, list, or array
+            
+        Returns
+        -------
+        rmasks : list-like
+            Appears to be a list of 2d masks, but actually makes internal
+            calls during member access. See quasiList_ABC
+        '''
         self._idx = list(range(1, idx+1)) if type(idx) is int else idx
+        assert len(self._idx) == len(rslices), 'idx is inconsistent with len(rslices)'
         self._labels = labels
         self._rslices = rslices
 
@@ -78,11 +123,35 @@ class RegionMasks_labels(quasiList_ABC):
     def _downselect(self, isvalid):
         idx = self._idx[isvalid]
         rslices = self._rslices[isvalid]
-        return RegionMasks_labels(rslices, self._labels, idx)
+        return rmasks_fromlabels(rslices, self._labels, idx)
 
 
-class RegionMasks_ellipse(quasiList_ABC):
+class rmasks_xyellipse(quasiList_ABC):
     def __init__(self, rslices, poi, xrad, yrad, x, y):
+        '''
+        Creates a list-like (quasiList_ABC) set of masks, where each
+        mask is defined by elliptical radii xrad, yrad.
+
+        Parameters
+        ----------
+        rslices : list of (jslice, islice)
+            See get_rslices() for formatting.
+        poi : array([[j0, i0], [j1, i1], ...])
+            Points-of-Interest (same as peaks from
+            skimage.feature.peak_local_max)
+        xrad : array-like (often int type)
+            semi-width of ROI
+        yrad : array-like (often int type)
+            semi-height of ROI
+        x, y : 2d array
+            global pixel coordinates
+
+        Returns
+        -------
+        rmasks : list-like
+            Appears to be a list of 2d masks, but actually makes internal
+            calls during member access. See quasiList_ABC
+        '''
         # also need x, y as inputs, though almost silly
         self._rslices = rslices
         self._poi = poi
@@ -110,18 +179,8 @@ class RegionMasks_ellipse(quasiList_ABC):
         xrad = self._xrad[isvalid]
         yrad = self._yrad[isvalid]
         rslices = self._rslices[isvalid]
-        return RegionMasks_ellipse(
+        return rmasks_xyellipse(
             rslices, poi, xrad, yrad, self._x, self._y)
-
-
-def idx_to_rslices(j1, j2, i1, i2):
-    Npoi = len(j1)
-    rslices = [None] * Npoi
-    for k in range(Npoi):
-        jslice = slice(j1[k], j2[k])
-        islice = slice(i1[k], i2[k])
-        rslices[k] = (jslice, islice)
-    return rslices
 
 
 class Regions():
@@ -131,7 +190,15 @@ class Regions():
         self.rslices = rslices
         self.rmasks = rmasks
 
-    def region_k(self, k, imG, keys=None):
+    def __len__(self):
+        return len(self.rslices)
+
+    def region_I(self, k, I):
+        jslice, islice = self.rslices[k]
+        val = I[jslice, islice]
+        return val if (self.rmasks is None) else val * self.rmasks[k]
+
+    def region_imG(self, k, imG, keys=None):
         '''
         Parameters
         ----------
@@ -153,13 +220,8 @@ class Regions():
         imG_k = {}
         if keys is None:
             keys = imG.keys()
-        if self.rmasks is not None:
-            mask = self.rmasks[k]
         for key in keys:
-            val = imG[key][jslice, islice]
-            if self.rmasks is not None:
-                val *= mask
-            imG_k[key] = val
+            imG_k[key] = self.region_I(k, imG[key])
         return imG_k
 
     def downselect(self, isvalid):
@@ -168,10 +230,24 @@ class Regions():
         return Regions(rslices, rmasks)
 
     def plot_k(self, k, imG, keys=['ones', 'I0', 'I1']):
+        '''
+        Make a subplot series for a single region.
+
+        Parameters
+        ----------
+        k : int
+            Select which region to plot/
+        imG : dict of 2d arrays
+            Needs to contain keys. 2d arrays of the same size as the original
+            image, will be sliced by self.region_k(...)
+        keys : list of str, optional
+            Select the keys in imG to be plotted.
+            The default is ['ones', 'I0', 'I1'].
+        '''
         Nplot = len(keys)
         if Nplot < 1: return
         _plt.figure()
-        imG_k = self.region_k(k, imG, keys=keys)
+        imG_k = self.region_imG(k, imG, keys=keys)
         for i in range(Nplot):
             key = keys[i]
             _plt.subplot(1, Nplot, i+1)
@@ -224,9 +300,9 @@ class Regions():
                 i2.append(_np.max(x_k))
                 j1.append(_np.min(y_k))
                 j2.append(_np.max(y_k))
-        rslices = idx_to_rslices(_np.array(j1), _np.array(j2),
-                                 _np.array(i1), _np.array(i2))
-        rmasks = RegionMasks_labels(rslices, label, ind)
+        rslices = get_rslices(_np.array(j1), _np.array(j2),
+                              _np.array(i1), _np.array(i2))
+        rmasks = rmasks_fromlabels(rslices, label, ind)
         return cls(rslices, rmasks)
 
     @classmethod
@@ -272,7 +348,7 @@ class Regions():
         j2 = _np.minimum(ny - 1, j + yrad + 1)
         i1 = _np.maximum(0, i - xrad)
         i2 = _np.minimum(nx - 1, i + xrad + 1)
-        rslices = idx_to_rslices(_np.array(j1), _np.array(j2),
-                                 _np.array(i1), _np.array(i2))
-        rmasks = RegionMasks_ellipse(rslices, poi, xrad, yrad, x, y)
+        rslices = get_rslices(_np.array(j1), _np.array(j2),
+                              _np.array(i1), _np.array(i2))
+        rmasks = rmasks_xyellipse(rslices, poi, xrad, yrad, x, y)
         return cls(rslices, rmasks)

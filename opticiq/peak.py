@@ -77,6 +77,68 @@ def find_major_sigma(x, y, Inorm):
     return maj_sigma, min_sigma, -theta
 
 
+def peaksAnalysis(roi, imG, key, require=['cx', 'cy']):
+    '''
+    For each region in roi, analyze properties of a peak in that region.
+
+    Parameters
+    ----------
+    roi : Regions
+        DESCRIPTION.
+    imG : dict of 2d arrays
+        DESCRIPTION.
+    key : str
+        The image in imG to be analyzed
+    require : list of str, optional
+        DESCRIPTION. The default is [].
+
+    Returns
+    -------
+    peaks : dict of arrays
+        DESCRIPTION.
+
+    Names of Arrays
+    ---------------
+    | E : integral
+    | cx, cy : fractional centroids in global coordinates
+    | xsigma, ysigma : sigma is a second moment, oriented to x, y axes.
+    '''
+    peaks = {}
+    do_xysigma = 'xsigma' in require or 'ysigma' in require
+    do_cent = do_xysigma or ('cx' in require or 'cy' in require)
+    do_E = do_cent or 'E' in require
+    if do_E:
+        E = _np.zeros(len(roi))
+    if do_cent:
+        cx, cy = _np.zeros(len(roi)), _np.zeros(len(roi))
+    if do_xysigma:
+        xsigma, ysigma = _np.zeros(len(roi)), _np.zeros(len(roi))
+    for k in range(len(roi)):
+        imG_k = roi.region_imG(k, imG, keys=['x', 'y', key])
+        xk = imG_k['x']
+        yk = imG_k['y']
+        I = imG_k[key]
+        if do_E:
+            E[k] = _np.sum(I)
+        if do_cent:
+            cy[k] = _np.sum(yk * I) / E[k]
+            cx[k] = _np.sum(xk * I) / E[k]
+        if do_xysigma:
+            xsigma[k] = _np.sqrt(_np.sum(
+                (xk[k] - cx[k])**2 * I / E[k]))
+            ysigma[k] = _np.sqrt(_np.sum(
+                (yk[k] - cy[k])**2 * I / E[k]))
+    if do_E:
+        peaks['E'] = E
+    if do_cent:
+        peaks['cx'] = cx
+        peaks['cy'] = cy
+    if do_xysigma:
+        peaks['xsigma'] = xsigma
+        peaks['ysigma'] = ysigma
+    return peaks
+
+
 class PeaksAnalysis():
     '''
     Properties
@@ -95,40 +157,27 @@ class PeaksAnalysis():
         Actually it's just the same as sigma, but 4x, i.e. 4*(second-moment).
         And that makes it a well used measurement of diameter.
     '''
-    def __init__(self, I, ROI, weight=None, darklevel=0):
+    def __init__(self, roi, imG, key):
         '''
         Parameters
         ----------
-        I : 2d array
-            image
-        ROI : child of ROI_ABC
+        roi : Regions object
             defines Region of Interest for each peak
-        weight : array of weights, optional
-            The default is None, which triggers weight =
-            eval_at_peak(I, POI). This can be overrided if it ought
-            to mean something else.
-        darklevel : float
-            background dark level
+        imG : dict of 2d arrays
+            must contain key and 'x', 'y' at a minimum
         '''
-        self.I = I
-        self.Npoi = len(ROI.slices)
-        self.ROI = ROI
-        self.simplified = True
-        light = [None] * self.Npoi
-        for i in range(self.Npoi):
-            # yeah, this is probably unnecessary
-            mask = self.ROI.masks[i]
-            frame = self.ROI.frames[i]
-            dark = self.darklevel[i]
-            light[i] = (frame - dark) * mask
-        self._light = light
+        self.imG = imG
+        self.key = key
+        self.N = len(roi)
+        self.roi = roi
 
     @property
     def energy(self):
         if not hasattr(self, '_energy'):
-            energy = _np.zeros(self.Npoi)
-            for i in range(self.Npoi):
-                energy[i] = _np.sum(self._light[i])
+            energy = _np.zeros(self.N)
+            for k in range(self.N):
+                
+                energy[k] = _np.sum(self.roi.region_I(k, self.I))
             self._energy = energy
         return self._energy
 
@@ -136,12 +185,13 @@ class PeaksAnalysis():
     def centroid(self):
         if not hasattr(self, '_centroid'):
             norm = self.energy
-            cy, cx = _np.zeros(self.Npoi), _np.zeros(self.Npoi)
-            for i in range(self.Npoi):
-                xframe = self.ROI.xframes[i]
-                yframe = self.ROI.yframes[i]
-                cy[i] = _np.sum(yframe * self._light[i]) / norm[i]
-                cx[i] = _np.sum(xframe * self._light[i]) / norm[i]
+            cy, cx = _np.zeros(self.N), _np.zeros(self.N)
+            for k in range(self.N):
+                # FIXME
+                xframe = self.roi.xframes[k]
+                yframe = self.roi.yframes[k]
+                cy[k] = _np.sum(yframe * self._light[k]) / norm[k]
+                cx[k] = _np.sum(xframe * self._light[k]) / norm[k]
             self._centroid = cy, cx
         return self._centroid
 
