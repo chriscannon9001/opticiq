@@ -6,6 +6,7 @@ Created on Sat Feb 25 14:26:02 2023
 @author: chris
 """
 
+from .edge import *
 from .grad import *
 from .peak import *
 from .recipes import *

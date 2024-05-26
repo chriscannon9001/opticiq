@@ -9,6 +9,9 @@ Created on Fri Dec 22 21:39:35 2023
 import numpy as _np
 from skimage.feature import peak_local_max as _peak
 
+from .edge import edgeH_Analysis as _edgeH_Analysis
+from .edge import edgeV_Analysis as _edgeV_Analysis
+from .edge import esf2mtf as _esf2mtf
 from .grad import imageGradients as _imageGrad
 from .grad import maskedges_hvx as _mask_ehvx
 from .peak import peaksAnalysis as _peaksAnalysis
@@ -140,7 +143,37 @@ def recipe_slantedge(I0, sigma, threshold=0.1, min_area=20):
     roi_vn = _Regions.from_mask(imG['mask_v_neg'], imG, min_area=min_area)
     roi_hp = _Regions.from_mask(imG['mask_h_pos'], imG, min_area=min_area)
     roi_hn = _Regions.from_mask(imG['mask_h_neg'], imG, min_area=min_area)
-    return imG, roi_vp, roi_vn, roi_hp, roi_hn
+    rval = dict(imG=imG, roi_vp=roi_vp, roi_vn=roi_vn, roi_hp=roi_hp,
+                roi_hn=roi_hn)
+    esf_vp = []
+    rval['esf_vp'] = esf_vp
+    for k in range(len(roi_vp.rslices)):
+        imG_k = roi_vp.region_imG(k, imG)
+        ESF, dx, details = _edgeV_Analysis(imG_k)
+        LSF, MTF = _esf2mtf(ESF, dx)
+        esf_vp.append((k, ESF, dx, LSF, MTF, details))
+    esf_vn = []
+    rval['esf_vn'] = esf_vn
+    for k in range(len(roi_vn.rslices)):
+        imG_k = roi_vn.region_imG(k, imG)
+        ESF, dx, details = _edgeV_Analysis(imG_k)
+        LSF, MTF = _esf2mtf(ESF, dx)
+        esf_vn.append((k, ESF, dx, LSF, MTF, details))
+    esf_hp = []
+    rval['esf_hp'] = esf_hp
+    for k in range(len(roi_hp.rslices)):
+        imG_k = roi_hp.region_imG(k, imG)
+        ESF, dy, details = _edgeH_Analysis(imG_k)
+        LSF, MTF = _esf2mtf(ESF, dy)
+        esf_hp.append((k, ESF, dy, LSF, MTF, details))
+    esf_hn =[]
+    rval['esf_hn'] = esf_hn
+    for k in range(len(roi_hn.rslices)):
+        imG_k = roi_hn.region_imG(k, imG)
+        ESF, dy, details = _edgeH_Analysis(imG_k)
+        LSF, MTF = _esf2mtf(ESF, dy)
+        esf_hn.append((k, ESF, dy, LSF, MTF, details))
+    return rval
 
 
 '''def recipe_starfield(I, sigma, threshold=0.05):
