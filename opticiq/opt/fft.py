@@ -7,6 +7,49 @@ Created on Sat Feb  1 11:42:43 2025
 """
 
 import numpy as _np
+from matplotlib import pyplot as _plt
+
+
+def plot_Efield(EF, *args):
+    '''
+    Simple plot of Intensity and Phase of an Efield.
+    Returns pyplot figure and subplot objects for further customization.
+
+    Parameters
+    ----------
+    EF : 2d Array
+        Efield
+    x, y : 2d Array, optional
+        Provide x,y ordinates if you want them plotted instead of
+        row,column
+
+    Returns
+    -------
+    fig : 
+        figure
+    ax0, ax1 : 
+        subplots
+    '''
+    fig, (ax0, ax1) = _plt.subplots(1, 2)
+    I = _np.abs(EF * _np.conjugate(EF))
+    phase = _np.arctan2(_np.real(EF), _np.imag(EF))
+    # plot intensity
+    if len(args) == 2:
+        ax0.contourf(*args, I)
+        ax0.set_xlabel('X')
+        ax0.set_ylabel('Y')
+    else:
+        ax0.contourf(I)
+    ax0.set_title('Intensity')
+    # plot phase
+    if len(args) == 2:
+        ax1.contourf(*args, phase)
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
+    else:
+        ax1.contourf(phase)
+    ax1.set_title('Phase')
+    return fig, ax0, ax1
 
 
 def fft_Efield(EFp):
@@ -29,32 +72,76 @@ def fft_Efield(EFp):
     return PSF
 
 
-def fft_coords(x, wavelength):
+def fftfreq(n, d, wavelength):
     '''
-    Formula to convert linear pupil axis to frequency FFT axis output.
+    Warp around np.fft.fftfreq to consider wavelength, and throw in fftshift.
+    f = fftshift(0, 1, ..., n/2-1, ..., -1) * wavelength/(d*n) if n is even
+    f = fftshift(0, 1, ..., (n-1)/2, ..., -1) * wavelength/(d*n) if n is odd
 
     Parameters
     ----------
-    x : 1d array
-        Pupil plane axis
-    wavelength : float
-        Same units as x (e.g. mm)
+    n : int
+        Window length
+    d : float
+        Sample spacing
+    wavelength: float
+        Same units as d
 
     Returns
     -------
-    u : 1d array
+    f : 1d array
         Frequency space coordinates of after fft_Efield (radians)
 
     Example::
+        
         # assume EFp has 128 samples at 0.1mm pitch and wavelength is 0.5um;
-        x = numpy.arange(-64, 65) * .1
-        u = fft_coords(x, 0.5/1000)
+        f = fftfreq(128, .1, 0.5/1000)
     '''
-    assert _np.ndim(x) == 1, 'expected x to be 1d array'
-    nx = len(x)
-    xrange = _np.abs(x[-1] - x[0])    # fixme; these should work a little different for even nx or ny
-    u = _np.arange(-nx / 2 + .5, nx / 2 + .5) * wavelength / xrange
-    return u
+    f = _np.fft.fftshift(_np.fft.fftfreq(n, d) * wavelength)
+    return f
+
+
+def init_coords(apitch, xpitch, wavelength):
+    '''
+    Helper to initialize pupil and frequency coordinates while meeting expected
+    pitch in each.
+
+    Parameters
+    ----------
+    apitch : float
+        Desired angular pitch in angular (image) space. (radians).
+        Negative indicates a min apitch rather than exact (will round down).
+    xpitch : float
+        Desired linear pitch in pupil space. (same units as wavelength).
+        Negative indicates a min xpitch rather than exact (will round down).
+        One of xpitch or apitch needs to be negative.
+    wavelength : float
+        Wavelength of light in units of choice
+
+    Returns
+    -------
+    apitch : float
+    xpitch : float
+    npix : int
+    '''
+    if apitch < 0:
+        assert xpitch>0, 'Expected one of apitch or xpitch to be >0'
+        pupilspan0 = wavelength / -apitch
+        npix = int(_np.ceil(pupilspan0 / xpitch)) + 1
+        # after rounding, recalc pupilspan and apitch
+        pupilspan = (npix - 1) * xpitch
+        apitch = wavelength / pupilspan
+    elif xpitch < 0:
+        assert apitch>0, 'Expected one of apitch or xpitch to be >0'
+        pupilspan = wavelength / apitch
+        npix = int(_np.ceil(pupilspan / -xpitch))
+        # after rounding, recalc xpitch
+        xpitch = pupilspan / npix
+    else:
+        raise(ValueError, 'Expected one of apitch or xpitch to be <0')
+    x_ax = _np.linspace(-pupilspan/2, pupilspan/2, npix)
+    a_ax = fftfreq(npix, xpitch, wavelength)
+    return apitch, xpitch, npix, x_ax, a_ax
 
 
 def aperture_Efield(x, y, EF, ODx, ODy, cx=0, cy=0):
