@@ -50,6 +50,9 @@ class quasiList_ABC(_ABC):
     Inheritable ABC with the purpose of making callables appear and behave
     like a list. Requires a child class to define ._select(k) and
     ._downselect(bool0, bool1, etc)
+
+    The purpose of this is to delay execution, esp. for multi-threading when
+    the number of ROI exceeds the number of cores.
     '''
     def __getitem__(self, indices):
         if _np.isscalar(indices):
@@ -229,7 +232,7 @@ class Regions():
         rmasks = None if (self.rmasks is None) else self.rmasks[isvalid]
         return Regions(rslices, rmasks)
 
-    def plot_k(self, k, imG, keys=['ones', 'I0', 'I1']):
+    def plot_k(self, k, imG, keys=['ones', 'I0', 'I1'], axes=None):
         '''
         Make a subplot series for a single region.
 
@@ -243,16 +246,27 @@ class Regions():
         keys : list of str, optional
             Select the keys in imG to be plotted.
             The default is ['ones', 'I0', 'I1'].
+        axes : tuple of pyplot Axes
+            Optional. Provide axes (matching length of keys), i.e. in order to
+            customize panel construction.
+
+        Returns
+        -------
+        axes : tuple of pyplot Axes
+            Useful for customizing axes
         '''
         Nplot = len(keys)
         if Nplot < 1: return
+        if axes is None:
+            _, axes = _plt.subplots(1, Nplot, layout='tight')
         _plt.figure()
         imG_k = self.region_imG(k, imG, keys=keys)
         for i in range(Nplot):
             key = keys[i]
-            _plt.subplot(1, Nplot, i+1)
-            _plt.imshow(imG_k[key], cmap='gray')
-            _plt.title(key)
+            ax = axes[i]
+            ax.imshow(imG_k[key], cmap='gray')
+            ax.set_title(key)
+        return axes
 
     @classmethod
     def from_mask(cls, mask, *args, min_area=1):
@@ -319,8 +333,6 @@ class Regions():
 
         Parameters
         ----------
-        Ishape : (nj, ni)
-            shape of image containing all POI, i.e. I.shape
         poi : array([[j0, i0], [j1, i1], ...])
             Points-of-Interest (same as peaks from
             skimage.feature.peak_local_max)
@@ -328,13 +340,15 @@ class Regions():
             semi-width of ROI
         yrad : array-like (often int type)
             semi-height of ROI
+        Ishape : (nj, ni)
+            shape of image containing all POI, i.e. I.shape
         x, y : 2d array
             global pixel coordinates
         '''
         if len(args) == 1:
             if type(args[0]) is tuple:
                 Ishape = args[0]
-                raise NotImplementedError()
+                #raise NotImplementedError()
             else:
                 x, y = args[0]['x'], args[0]['y']
                 Ishape = x.shape
@@ -344,11 +358,12 @@ class Regions():
         ny, nx = Ishape
         j = poi[:, 0]
         i = poi[:, 1]
-        j1 = _np.maximum(0, j - yrad)
-        j2 = _np.minimum(ny - 1, j + yrad + 1)
-        i1 = _np.maximum(0, i - xrad)
-        i2 = _np.minimum(nx - 1, i + xrad + 1)
+        j1 = _np.maximum(0, j - yrad + .5).astype(int)
+        j2 = _np.minimum(ny - 1, j + yrad + 1.5).astype(int)
+        i1 = _np.maximum(0, i - xrad + .5).astype(int)
+        i2 = _np.minimum(nx - 1, i + xrad + 1.5).astype(int)
         rslices = get_rslices(_np.array(j1), _np.array(j2),
                               _np.array(i1), _np.array(i2))
         rmasks = rmasks_xyellipse(rslices, poi, xrad, yrad, x, y)
         return cls(rslices, rmasks)
+

@@ -77,25 +77,28 @@ def find_major_sigma(x, y, Inorm):
     return maj_sigma, min_sigma, -theta
 
 
-def peaksAnalysis(roi, imG, key, require=['cx', 'cy']):
+def peaksAnalysis(roi, imG, key, require=['cx', 'cy'], bg=None):
     '''
     For each region in roi, analyze properties of a peak in that region.
 
     Parameters
     ----------
     roi : Regions
-        DESCRIPTION.
+        Regions of interest
     imG : dict of 2d arrays
-        DESCRIPTION.
+        Normally, the original image array I0 and its gradients. Needs to have
+        'x', 'y', and key at least.
     key : str
         The image in imG to be analyzed
     require : list of str, optional
-        DESCRIPTION. The default is [].
+        Specify min set of analyses that will run. The default is ['cx', 'cy'].
+        Dependencies left unspecified will be auto resolved. For example,
+        'xsigma' alone will imply 'cx'.
 
     Returns
     -------
     peaks : dict of arrays
-        DESCRIPTION.
+        Table of results.
 
     Names of Arrays
     ---------------
@@ -105,7 +108,8 @@ def peaksAnalysis(roi, imG, key, require=['cx', 'cy']):
     '''
     peaks = {}
     do_xysigma = 'xsigma' in require or 'ysigma' in require
-    do_cent = do_xysigma or ('cx' in require or 'cy' in require)
+    do_majsigma = 'maj_sigma' in require or 'min_sigma' in require
+    do_cent = do_xysigma or do_majsigma or ('cx' in require or 'cy' in require)
     do_E = do_cent or 'E' in require
     if do_E:
         E = _np.zeros(len(roi))
@@ -113,11 +117,15 @@ def peaksAnalysis(roi, imG, key, require=['cx', 'cy']):
         cx, cy = _np.zeros(len(roi)), _np.zeros(len(roi))
     if do_xysigma:
         xsigma, ysigma = _np.zeros(len(roi)), _np.zeros(len(roi))
+    if do_majsigma:
+        maj_sigma = _np.zeros(len(roi))
+        min_sigma = _np.zeros(len(roi))
+        theta = _np.zeros(len(roi))
     for k in range(len(roi)):
         imG_k = roi.region_imG(k, imG, keys=['x', 'y', key])
         xk = imG_k['x']
         yk = imG_k['y']
-        I = imG_k[key]
+        I = imG_k[key] if bg is None else _np.maximum(0, imG_k[key] - bg[k])
         if do_E:
             E[k] = _np.sum(I)
         if do_cent:
@@ -125,9 +133,12 @@ def peaksAnalysis(roi, imG, key, require=['cx', 'cy']):
             cx[k] = _np.sum(xk * I) / E[k]
         if do_xysigma:
             xsigma[k] = _np.sqrt(_np.sum(
-                (xk[k] - cx[k])**2 * I / E[k]))
+                (xk - cx[k])**2 * I) / E[k])
             ysigma[k] = _np.sqrt(_np.sum(
-                (yk[k] - cy[k])**2 * I / E[k]))
+                (yk - cy[k])**2 * I) / E[k])
+        if do_majsigma:
+            maj_sigma[k], min_sigma[k], theta[k] = find_major_sigma(
+                xk - cx[k], yk - cy[k], I/E[k])
     if do_E:
         peaks['E'] = E
     if do_cent:
@@ -136,7 +147,31 @@ def peaksAnalysis(roi, imG, key, require=['cx', 'cy']):
     if do_xysigma:
         peaks['xsigma'] = xsigma
         peaks['ysigma'] = ysigma
+    if do_majsigma:
+        peaks['maj_sigma'] = maj_sigma
+        peaks['min_sigma'] = min_sigma
+        peaks['theta'] = theta
     return peaks
+
+
+def peaksPlotter(roi, I0, peaks, tag='k+', cmap='jet', header=None):
+    _, ax = _plt.subplots(1, 1, layout='tight')
+    ax.imshow(I0, cmap=cmap)
+    if header is None:
+        header = list(peaks.keys())
+    Npeaks = len(peaks[header[0]])
+    #print('Npeaks', Npeaks)
+    for i in range(Npeaks):
+        cx, cy = peaks['cx'][i], peaks['cy'][i]
+        key = header[0]
+        text = '%s %0.3e' % (key, peaks[key][i])
+        for key in header[1:]:
+            text += '\n%s %0.3e' % (key, peaks[key][i])
+        #print(text)
+        ax.plot(cx, cy, tag)
+        ax.text(cx+10, cy, text,
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=.6))
+    return ax
 
 
 class PeaksAnalysis():

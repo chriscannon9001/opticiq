@@ -16,6 +16,7 @@ from .grad import imageGradients as _imageGrad
 from .grad import maskedges_hvx as _mask_ehvx
 from .peak import peaksAnalysis as _peaksAnalysis
 from .roi import Regions as _Regions
+from .bg import background_fromroiBG, ringRegions
 
 
 def unit_norm(a, ref=None):
@@ -176,5 +177,93 @@ def recipe_slantedge(I0, sigma, threshold=0.1, min_area=20):
     return rval
 
 
-'''def recipe_starfield(I, sigma, threshold=0.05):
-    grad = _imageGrad(I, sigma, ['curve'])'''
+def recipe_star1(I0, sigma, threshold=0.1):
+    '''
+    Find stars (or beams) in an image in a single pass.
+    Using curvature and slope-magnitude to find ROI.
+
+    Parameters
+    ----------
+    I0 : 2d array
+        original image
+    sigma : float
+        sigma for Gaussian blur (pixels)
+    threshold : float, optional
+        threshold of mask. The default is 0.1.
+
+    Returns
+    -------
+    imG : dict of 2d arrays
+        See imageGradients
+    roi : Regions object
+        Regions of Interest
+    peaks : dict of 1d arrays
+    '''
+    imG = _imageGrad(I0, sigma, ['curve', 'I_r'])
+    maskA = imG['I_r']/_np.max(imG['I_r']) > threshold
+    maskB = imG['curve']/_np.min(imG['curve']) > threshold
+    # 1st iteration:
+    # peak mask = (slope mag is rel. max) | (curve is rel. min)
+    mask = maskA | maskB
+    roi = _Regions.from_mask(mask, imG)
+    peaks = _peaksAnalysis(roi, imG, 'I0', ['xsigma', 'ysigma'])
+    return imG, roi, peaks
+
+
+def recipe_star2(I0, sigma, threshold=0.1, nsigma=4):
+    '''
+    Find stars (or beams) in an image with a more noise resistant process:
+        * First pass; find ROI using curvature and slope-magnitude
+        * Surround every ROI with a ring to get background
+        * Calculate peak parameters
+        * Use (xsigma, ysigma) * nsigma to set revised ROI
+        * Ring based background again
+        * Recalc peak parameters
+
+    Parameters
+    ----------
+    I0 : 2d array
+        original image
+    sigma : float
+        sigma for Gaussian blur (pixels)
+    threshold : float, optional
+        threshold for first pass mask on curvature and slope-magnitude.
+        The default is 0.1.
+    nsigma : float, optional
+        ROI radius in nsigma, defines the size of the second-pass ROI.
+        The default is 4.
+
+    Returns
+    -------
+    imG : dict of 2d arrays
+        See imageGradients
+    roi : Regions object
+        Regions of Interest
+    peaks : dict of 1d arrays
+        For each peak, 
+    xdata : dict
+        Various extra results, only for curiosity
+    '''
+    imG = _imageGrad(I0, sigma, ['curve', 'I_r'])
+    maskA = imG['I_r']/_np.max(imG['I_r']) > threshold
+    maskB = imG['curve']/_np.min(imG['curve']) > threshold
+    # 1st iteration:
+    # peak mask = (slope mag is rel. max) | (curve is rel. min)
+    mask = maskA | maskB
+    #imG['mask'] = mask
+    roiA = _Regions.from_mask(mask, imG)
+    roibgA = ringRegions(roiA, 7, I0.shape)
+    bgA = background_fromroiBG(roibgA, I0)
+    peaksA = _peaksAnalysis(roiA, imG, 'I0', ['xsigma', 'ysigma'], bg=bgA)
+    # 2nd iteration:
+    # use xsigma, ysigma from prior to revise ROI
+    #poiA = list(zip(peaksA['cy'], peaksA['cx']))
+    poiA = _np.stack((peaksA['cy'], peaksA['cx']), axis=1)
+    #print(poiA)
+    roi = _Regions.from_poi(poiA, nsigma*peaksA['xsigma'], nsigma*peaksA['ysigma'], imG)
+    roibg = ringRegions(roi, 7, I0.shape)
+    bg = background_fromroiBG(roibg, I0)
+    peaks = _peaksAnalysis(roi, imG, 'I0', ['xsigma', 'ysigma'], bg=bg)
+    xdata = dict(roibgA=roibgA, peaksA=peaksA, bgA=bgA, roibg=roibg, bg=bg)
+    return imG, roi, peaks, xdata
+
