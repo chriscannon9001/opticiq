@@ -72,7 +72,8 @@ def ringRegions(roi, pad, *args, exclusion=None):
             # if an exclusion mask was passed, need to remove it from mask
             mask4 = mask3[jslice_int, islice_int]
             if exclusion is not None:
-                exclusion_k = exclusion[*rslice]
+                print('scaffold!')
+                exclusion_k = exclusion[rslice]
                 mask4 = mask4 & _np.logical_not(exclusion_k)
             rmasks.append(mask4)
     return Regions(rslices, rmasks)
