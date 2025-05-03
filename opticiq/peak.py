@@ -9,6 +9,7 @@ Created on Fri Mar 24 14:56:18 2023
 from matplotlib import pyplot as _plt
 import numpy as _np
 from scipy import optimize as _opt
+import warnings
 
 from .math import _rotate_2d
 
@@ -174,8 +175,32 @@ def peaksPlotter(roi, I0, peaks, tag='k+', cmap='jet', header=None):
     return ax
 
 
+def peaksDownselect(peaks, isvalid):
+    '''
+    Parameters
+    ----------
+    peaks : dict of uniform arrays
+        Typical form of peaks is e.g. {'E':[E0, E1, ...], 'cx':..}
+        Where all arrays are the same length.
+    isvalid : array of bool
+        Length needs to match the length of arrays in peaks.
+
+    Returns
+    -------
+    rpeaks : dict of uniform (shorter) arrays
+        Downselect all the peaks that aren't valid.
+    '''
+    rpeaks = {}
+    for key, val in peaks.items():
+        rpeaks[key] = val[isvalid]
+    return rpeaks
+
+
+@warnings.deprecated("Use peaksAnalysis function instead of PeaksAnalysis class")
 class PeaksAnalysis():
     '''
+    DEPRECIATED
+
     Properties
     ----------
     energy : array

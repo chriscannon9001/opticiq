@@ -14,7 +14,7 @@ from .edge import edgeV_Analysis as _edgeV_Analysis
 from .edge import esf2mtf as _esf2mtf
 from .grad import imageGradients as _imageGrad
 from .grad import maskedges_hvx as _mask_ehvx
-from .peak import peaksAnalysis as _peaksAnalysis
+from .peak import peaksAnalysis as _peaksAnalysis, peaksDownselect as _peaksDownselect
 from .roi import Regions as _Regions
 from .bg import background_fromroiBG, ringRegions
 
@@ -210,10 +210,11 @@ def recipe_star1(I0, sigma, threshold=0.1):
     return imG, roi, peaks
 
 
-def recipe_star2(I0, sigma, threshold=0.1, nsigma=4):
+def recipe_star2(I0, sigma, threshold=0.1, nsigma=4, E_amin=1, E_rmin=.02):
     '''
     Find stars (or beams) in an image with a more noise resistant process:
         * First pass; find ROI using curvature and slope-magnitude
+        * Downselect ROI w (E < E_amin) or (E/mx(E) < E_rmin) or cx,xsigma,etc=nan
         * Surround every ROI with a ring to get background
         * Calculate peak parameters
         * Use (xsigma, ysigma) * nsigma to set revised ROI
@@ -255,12 +256,18 @@ def recipe_star2(I0, sigma, threshold=0.1, nsigma=4):
     roibgA = ringRegions(roiA, 7, I0.shape)
     bgA = background_fromroiBG(roibgA, I0)
     peaksA = _peaksAnalysis(roiA, imG, 'I0', ['xsigma', 'ysigma'], bg=bgA)
+    # downselect peaks and roi
+    mxE = _np.max(peaksA['E'])
+    isvalid = ((peaksA['E'] > E_amin) & (peaksA['E']/mxE > E_rmin)
+               & ~_np.isnan(peaksA['cx']) & ~_np.isnan(peaksA['cy'])
+               & ~_np.isnan(peaksA['xsigma']) & ~_np.isnan(peaksA['ysigma']))
+    peaksB = _peaksDownselect(peaksA, isvalid)
     # 2nd iteration:
     # use xsigma, ysigma from prior to revise ROI
     #poiA = list(zip(peaksA['cy'], peaksA['cx']))
-    poiA = _np.stack((peaksA['cy'], peaksA['cx']), axis=1)
+    poiB = _np.stack((peaksB['cy'], peaksB['cx']), axis=1)
     #print(poiA)
-    roi = _Regions.from_poi(poiA, nsigma*peaksA['xsigma'], nsigma*peaksA['ysigma'], imG)
+    roi = _Regions.from_poi(poiB, nsigma*peaksB['xsigma'], nsigma*peaksB['ysigma'], imG)
     roibg = ringRegions(roi, 7, I0.shape)
     bg = background_fromroiBG(roibg, I0)
     peaks = _peaksAnalysis(roi, imG, 'I0', ['xsigma', 'ysigma'], bg=bg)
