@@ -196,7 +196,6 @@ def peaksDownselect(peaks, isvalid):
     return rpeaks
 
 
-@warnings.deprecated("Use peaksAnalysis function instead of PeaksAnalysis class")
 class PeaksAnalysis():
     '''
     DEPRECIATED
@@ -226,6 +225,7 @@ class PeaksAnalysis():
         imG : dict of 2d arrays
             must contain key and 'x', 'y' at a minimum
         '''
+        warnings.warn("Use peaksAnalysis function instead of PeaksAnalysis class")
         self.imG = imG
         self.key = key
         self.N = len(roi)

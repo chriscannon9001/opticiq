@@ -6,11 +6,14 @@ Created on Sat Feb 25 14:31:36 2023
 @author: chris
 """
 
-from itertools import pairwise as _pairwise
 import numpy as _np
 from PIL import Image as _Image, ImageDraw as _ImageDraw
 from sympy import Point as _Point, Polygon as _Polygon
 from sympy.geometry.util import convex_hull as _convex_hull
+try:
+    from itertools import pairwise as _pairwise
+except:
+    from more_itertools import pairwise as _pairwise
 
 from ..math import _rotate_vertices, _offset_vertices
 
