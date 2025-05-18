@@ -7,7 +7,7 @@ Created on Sat Feb 25 14:26:02 2023
 """
 
 
-__version__ = "0.0.5"
+__version__ = "0.1.0"
 __status__ = "Alpha"
 
 from .bg import *

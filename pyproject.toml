@@ -29,7 +29,7 @@ version = {attr = "opticiq.__version__"}
 test = [
     "pytest",
 ]
-gen = [
+extras = [
     "gdstk",
     "reportlab"
 ]
